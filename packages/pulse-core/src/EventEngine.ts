@@ -15,7 +15,7 @@ import type {
 } from "./index.js";
 
 type PendingPaymentEvent = Omit<PaymentEvent, "type"> & { type: "unknown" };
-type PendingNormalizedEvent = PendingPaymentEvent | AccountOptionsEvent;
+type NormalizedEventOrPending = PendingPaymentEvent | AccountOptionsEvent;
 
 type StreamCallbacks = {
   onmessage: (record: unknown) => void;
@@ -207,7 +207,7 @@ export class EventEngine {
     }
   }
 
-  private normalize(record: unknown): PendingNormalizedEvent | null {
+  private normalize(record: unknown): NormalizedEventOrPending | null {
     const r = record as Record<string, unknown>;
 
     if (r.type === "payment") {
@@ -242,7 +242,7 @@ export class EventEngine {
     const changes: AccountOptionsChanges = {};
 
     if (typeof r.signer_key === "string") {
-      const weight = r.signer_weight as number;
+      const weight = typeof r.signer_weight === "number" ? r.signer_weight : 0;
       if (weight === 0) {
         changes.signer_removed = { key: r.signer_key, weight: 0 };
       } else {
@@ -265,6 +265,9 @@ export class EventEngine {
       changes.home_domain = r.home_domain;
     }
 
+    // Known gap: set_flags, clear_flags, and inflation_dest are not tracked in `changes`.
+    // Operations that only modify those fields are intentionally dropped here as no-ops.
+    // TODO: track flag/inflation changes in a follow-up (see issue #XX).
     if (Object.keys(changes).length === 0) return null;
 
     return {
@@ -276,7 +279,7 @@ export class EventEngine {
     };
   }
 
-  private route(event: PendingNormalizedEvent): void {
+  private route(event: NormalizedEventOrPending): void {
     if (event.type === "account.options_changed") {
       const watcher = this.registry.get(event.source);
       if (watcher) {
